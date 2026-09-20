@@ -9,14 +9,24 @@ export abstract class BaseAgent {
 
   abstract getSystemPrompt(): string;
 
-  getUserPrompt(chunk: DiffChunk): string {
+  getUserPrompt(chunk: DiffChunk, customPrompt?: string, customRules?: Array<{ id: string; name: string; description: string; severity?: string }>): string {
     const fileList = chunk.files.map((f) => `- ${f.newPath !== 'unknown' ? f.newPath : f.oldPath}`).join('\n');
+
+    let extraContext = '';
+    if (customRules && customRules.length > 0) {
+      extraContext += '\nTeam Custom Rules to Enforce:\n' +
+        customRules.map((r) => `- [${r.id}] ${r.name} (${r.severity || 'WARNING'}): ${r.description}`).join('\n') + '\n';
+    }
+
+    if (customPrompt) {
+      extraContext += `\nAdditional Project-Specific Instructions:\n${customPrompt}\n`;
+    }
 
     return `Review the following git diff chunk (${chunk.chunkIndex} of ${chunk.totalChunks}).
 
 Files included in this chunk:
 ${fileList}
-
+${extraContext}
 Unified Git Diff:
 \`\`\`diff
 ${chunk.diffText}
@@ -51,9 +61,15 @@ Rules:
 6. Zero fluff. No conversational greetings or preambles. Output JSON only.`;
   }
 
-  async review(chunk: DiffChunk, provider: LLMProvider, model?: string): Promise<AgentReviewResult> {
+  async review(
+    chunk: DiffChunk,
+    provider: LLMProvider,
+    model?: string,
+    customPrompt?: string,
+    customRules?: Array<{ id: string; name: string; description: string; severity?: string }>
+  ): Promise<AgentReviewResult> {
     const systemPrompt = this.getSystemPrompt();
-    const userPrompt = this.getUserPrompt(chunk);
+    const userPrompt = this.getUserPrompt(chunk, customPrompt, customRules);
 
     const response = await provider.generate({
       systemPrompt,

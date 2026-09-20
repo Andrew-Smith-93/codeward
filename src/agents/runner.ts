@@ -13,6 +13,8 @@ export interface MultiAgentRunnerOptions {
   model?: string;
   enabledAgents?: string[];
   verbose?: boolean;
+  customPrompt?: string;
+  customRules?: Array<{ id: string; name: string; description: string; severity?: string }>;
 }
 
 export class MultiAgentRunner {
@@ -20,11 +22,15 @@ export class MultiAgentRunner {
   private provider: LLMProvider;
   private model?: string;
   private verbose: boolean;
+  private customPrompt?: string;
+  private customRules?: Array<{ id: string; name: string; description: string; severity?: string }>;
 
   constructor(options: MultiAgentRunnerOptions) {
     this.provider = options.provider;
     this.model = options.model;
     this.verbose = !!options.verbose;
+    this.customPrompt = options.customPrompt;
+    this.customRules = options.customRules;
 
     const allAgents: BaseAgent[] = [
       new SecuritySentinelAgent(),
@@ -76,7 +82,13 @@ export class MultiAgentRunner {
       // Execute all agents on this chunk concurrently
       const agentPromises = this.agents.map(async (agent) => {
         try {
-          const res = await agent.review(chunk, this.provider, this.model);
+          const res = await agent.review(
+            chunk,
+            this.provider,
+            this.model,
+            this.customPrompt,
+            this.customRules
+          );
           return { success: true as const, res, agent };
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);

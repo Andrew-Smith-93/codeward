@@ -11,6 +11,11 @@ import { synthesizeReport } from '../synthesizer/aggregator.js';
 import { renderTerminalReport } from '../reporters/terminal-reporter.js';
 import { renderMarkdownReport } from '../reporters/markdown-reporter.js';
 import { renderJsonReport } from '../reporters/json-reporter.js';
+import { renderSarifReport } from '../reporters/sarif-reporter.js';
+import { emitGitHubAnnotations } from '../reporters/github-annotations.js';
+import { detectGitHubContext } from '../git/github-context.js';
+import { loadConfig } from '../config/loader.js';
+import { runWatchMode } from './watch.js';
 import { FailOnThreshold, ReviewOptions } from '../types/index.js';
 
 // Load environment variables (.env)
@@ -33,38 +38,61 @@ program
   .option('-m, --model <model>', 'Override default model for the selected provider')
   .option('--api-key <key>', 'Provider API key (defaults to env var)')
   .option('--api-url <url>', 'Custom API base URL')
-  .option('-f, --format <format>', 'Output format: terminal, markdown, json', 'terminal')
+  .option('-f, --format <format>', 'Output format: terminal, markdown, json, sarif', 'terminal')
   .option('-o, --output <file>', 'Save output report to file')
-  .option('--fail-on <severity>', 'Fail with exit code 1 if issues found (critical, warning, suggestion, none)', 'critical')
+  .option('--fail-on <severity>', 'Fail with exit code 1 if issues found (critical, warning, suggestion, none)')
   .option('-a, --agents <agents>', 'Comma-separated agents to run: security, logic, performance')
   .option('--pr', 'Output GitHub PR-formatted Markdown')
   .option('--exclude <patterns>', 'Comma-separated file patterns to ignore')
+  .option('-c, --config <path>', 'Path to custom configuration file')
   .option('-v, --verbose', 'Show verbose debug information')
   .action(async (opts) => {
     const startTime = Date.now();
 
     try {
+      // 1. Load config file (.codewardrc.json)
+      const config = await loadConfig(opts.config);
+
+      // 2. Detect GitHub Actions / PR environment
+      const ghContext = await detectGitHubContext();
+
+      let targetBase = opts.base || config.provider; // cli flag takes precedence
+      if (!opts.base && ghContext.isPullRequest && ghContext.baseRef) {
+        targetBase = `origin/${ghContext.baseRef}`;
+        if (opts.verbose) {
+          console.log(chalk.gray(`Detected GitHub PR #${ghContext.prNumber}: diffing against ${targetBase}`));
+        }
+      } else if (opts.base) {
+        targetBase = opts.base;
+      } else {
+        targetBase = undefined;
+      }
+
       const format = opts.pr ? 'markdown' : (opts.format || 'terminal').toLowerCase();
-      const failOn = (opts.failOn || 'critical').toLowerCase() as FailOnThreshold;
+      const failOn = (opts.failOn || config.failOn || 'critical').toLowerCase() as FailOnThreshold;
 
       const reviewOptions: ReviewOptions = {
-        base: opts.base,
+        base: targetBase,
         staged: opts.staged,
         unstaged: opts.unstaged,
-        provider: opts.provider,
-        model: opts.model,
+        provider: opts.provider || config.provider,
+        model: opts.model || config.model,
         apiKey: opts.apiKey,
-        apiUrl: opts.apiUrl,
+        apiUrl: opts.apiUrl || config.apiUrl,
         format: format as 'terminal' | 'markdown' | 'json',
         output: opts.output,
         failOn,
-        agents: opts.agents ? opts.agents.split(',').map((a: string) => a.trim()) : undefined,
-        exclude: opts.exclude ? opts.exclude.split(',').map((e: string) => e.trim()) : undefined,
+        agents: opts.agents
+          ? opts.agents.split(',').map((a: string) => a.trim())
+          : config.agents,
+        exclude: opts.exclude
+          ? opts.exclude.split(',').map((e: string) => e.trim())
+          : config.exclude,
         verbose: !!opts.verbose,
         pr: !!opts.pr,
       };
 
-      // 1. Git Extraction & Filtering
+      // 3. Git Extraction & Filtering
       const git = new GitExtractor();
       const gitContext = await git.getGitContext();
 
@@ -89,24 +117,26 @@ program
         process.exit(0);
       }
 
-      // 2. Diff Chunking
+      // 4. Diff Chunking
       const chunks = chunkDiffFiles(files);
 
-      // 3. Provider Setup
+      // 5. Provider Setup
       const provider = resolveProvider(reviewOptions);
-      const effectiveModel = opts.model || provider.defaultModel;
+      const effectiveModel = reviewOptions.model || provider.defaultModel;
 
-      // 4. Parallel Multi-Agent Execution
+      // 6. Parallel Multi-Agent Execution
       const runner = new MultiAgentRunner({
         provider,
         model: effectiveModel,
         enabledAgents: reviewOptions.agents,
         verbose: reviewOptions.verbose,
+        customPrompt: config.customPrompt,
+        customRules: config.customRules,
       });
 
       const agentResults = await runner.run(chunks);
 
-      // 5. Synthesis & Deduplication
+      // 7. Synthesis & Deduplication
       const durationMs = Date.now() - startTime;
       const report = synthesizeReport(agentResults, {
         providerName: provider.name,
@@ -116,12 +146,17 @@ program
         durationMs,
       });
 
-      // 6. Format Output
+      // 8. GitHub Actions Inline Workflow Commands
+      emitGitHubAnnotations(report);
+
+      // 9. Format Output
       let rendered = '';
       if (format === 'json') {
         rendered = renderJsonReport(report);
       } else if (format === 'markdown') {
         rendered = renderMarkdownReport(report);
+      } else if (format === 'sarif') {
+        rendered = renderSarifReport(report);
       } else {
         rendered = renderTerminalReport(report);
       }
@@ -138,19 +173,32 @@ program
         console.log(rendered);
       }
 
-      // 7. CI Exit Code Evaluation
+      // 10. CI Exit Code Evaluation
       let shouldFail = false;
-      if (failOn === 'critical' && report.stats.critical > 0) {
-        shouldFail = true;
-      } else if (failOn === 'warning' && (report.stats.critical > 0 || report.stats.warning > 0)) {
-        shouldFail = true;
-      } else if (failOn === 'suggestion' && report.stats.total > 0) {
-        shouldFail = true;
+      const maxCritical = config.maxCritical ?? 0;
+      const maxWarning = config.maxWarning ?? 100;
+
+      if (failOn !== 'none') {
+        if (report.stats.critical > maxCritical) {
+          shouldFail = true;
+        }
+
+        if (report.stats.warning > maxWarning) {
+          shouldFail = true;
+        }
+
+        if (failOn === 'critical' && report.stats.critical > 0) {
+          shouldFail = true;
+        } else if (failOn === 'warning' && (report.stats.critical > 0 || report.stats.warning > 0)) {
+          shouldFail = true;
+        } else if (failOn === 'suggestion' && report.stats.total > 0) {
+          shouldFail = true;
+        }
       }
 
       if (shouldFail) {
         if (format === 'terminal') {
-          console.error(chalk.red.bold(`\n✖ Review failed due to --fail-on ${failOn} threshold.`));
+          console.error(chalk.red.bold(`\n✖ Review failed quality gate (${failOn} threshold / max critical: ${maxCritical}).`));
         }
         process.exit(1);
       }
@@ -159,6 +207,33 @@ program
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(chalk.red(`\nError: ${message}`));
+      process.exit(1);
+    }
+  });
+
+program
+  .command('watch')
+  .description('Live review loop on file save/staging in local git workspace')
+  .option('-s, --staged', 'Watch only staged changes')
+  .option('-p, --provider <provider>', 'LLM provider')
+  .option('-m, --model <model>', 'LLM model')
+  .option('-a, --agents <agents>', 'Comma-separated agents to run')
+  .option('-c, --config <path>', 'Path to custom configuration file')
+  .action(async (opts) => {
+    try {
+      const config = await loadConfig(opts.config);
+      const reviewOptions: ReviewOptions = {
+        staged: !!opts.staged,
+        provider: opts.provider || config.provider,
+        model: opts.model || config.model,
+        agents: opts.agents ? opts.agents.split(',').map((a: string) => a.trim()) : config.agents,
+        exclude: config.exclude,
+      };
+
+      await runWatchMode(reviewOptions, config);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(chalk.red(`Watch command failed: ${message}`));
       process.exit(1);
     }
   });
@@ -180,6 +255,14 @@ program
         failOn: 'critical',
         agents: ['security', 'logic', 'performance'],
         exclude: ['**/*.spec.ts', '**/*.test.ts'],
+        customRules: [
+          {
+            id: 'TEAM-001',
+            name: 'Require strict tenant validation',
+            description: 'All database queries must include tenant_id filter.',
+            severity: 'CRITICAL',
+          },
+        ],
       };
 
       const workflowContent = `name: Codeward Multi-Agent Review
@@ -191,6 +274,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  security-events: write # Required for SARIF upload
 
 jobs:
   review:
@@ -222,6 +306,7 @@ jobs:
       console.log(chalk.cyan('\nNext steps:'));
       console.log('  1. Add OPENAI_API_KEY to your GitHub repository secrets.');
       console.log('  2. Run `codeward review --base main` to test locally.');
+      console.log('  3. Run `codeward watch` for real-time live review while coding.');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(chalk.red(`Init failed: ${message}`));
