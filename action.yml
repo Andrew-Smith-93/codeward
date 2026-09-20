@@ -51,9 +51,13 @@ runs:
       with:
         node-version: 22
 
-    - name: Install Codeward CLI
+    - name: Install and Build Codeward
       shell: bash
-      run: npm install -g codeward
+      run: |
+        cd "${{ github.action_path }}"
+        npm ci
+        npm run build
+        npm link
 
     - name: Run Multi-Agent Review
       id: review
