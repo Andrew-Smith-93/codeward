@@ -1,0 +1,119 @@
+name: 'Codeward Multi-Agent Code Review'
+description: 'Runs parallel multi-agent security audits and reliability reviews on pull requests'
+author: 'Codeward'
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  provider:
+    description: 'LLM provider (openai, anthropic, gemini, ollama)'
+    required: false
+    default: 'openai'
+  model:
+    description: 'Model identifier (e.g. gpt-4o-mini, claude-3-5-sonnet-20241022, gemini-2.0-flash)'
+    required: false
+    default: ''
+  api-key:
+    description: 'API key for the chosen LLM provider'
+    required: false
+    default: ''
+  api-url:
+    description: 'Custom API base URL'
+    required: false
+    default: ''
+  base-branch:
+    description: 'Target base branch for diff analysis'
+    required: false
+    default: 'origin/main'
+  fail-on:
+    description: 'Exit code 1 threshold (critical, warning, suggestion, none)'
+    required: false
+    default: 'critical'
+  agents:
+    description: 'Comma-separated agents to run (security, logic, performance)'
+    required: false
+    default: 'security,logic,performance'
+  github-token:
+    description: 'GitHub token for posting review comments to Pull Request'
+    required: false
+    default: ''
+  comment-on-pr:
+    description: 'Post review markdown as PR comment'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    - name: Install Codeward CLI
+      shell: bash
+      run: npm install -g codeward
+
+    - name: Run Multi-Agent Review
+      id: review
+      shell: bash
+      env:
+        OPENAI_API_KEY: ${{ inputs.api-key }}
+        ANTHROPIC_API_KEY: ${{ inputs.api-key }}
+        GEMINI_API_KEY: ${{ inputs.api-key }}
+      run: |
+        CMD="codeward review --base ${{ inputs.base-branch }} --provider ${{ inputs.provider }} --fail-on ${{ inputs.fail-on }} --agents ${{ inputs.agents }} --pr --output /tmp/codeward-report.md"
+        if [ -n "${{ inputs.model }}" ]; then
+          CMD="$CMD --model ${{ inputs.model }}"
+        fi
+        if [ -n "${{ inputs.api-key }}" ]; then
+          CMD="$CMD --api-key ${{ inputs.api-key }}"
+        fi
+        if [ -n "${{ inputs.api-url }}" ]; then
+          CMD="$CMD --api-url ${{ inputs.api-url }}"
+        fi
+
+        echo "Executing: $CMD"
+        $CMD
+
+    - name: Comment on PR
+      if: ${{ (inputs.comment-on-pr == 'true' || success() || failure()) && inputs.github-token != '' && github.event_name == 'pull_request' }}
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const fs = require('fs');
+          if (!fs.existsSync('/tmp/codeward-report.md')) {
+            console.log('No report file found to comment.');
+            return;
+          }
+          const body = fs.readFileSync('/tmp/codeward-report.md', 'utf8');
+          const issue_number = context.issue.number;
+
+          // Find existing sticky comment
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number,
+          });
+
+          const botComment = comments.find(c => c.body.includes('Codeward Code Review & Security Audit'));
+
+          if (botComment) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: botComment.id,
+              body,
+            });
+            console.log('Updated existing Codeward PR comment.');
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              body,
+            });
+            console.log('Created new Codeward PR comment.');
+          }

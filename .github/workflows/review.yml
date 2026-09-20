@@ -1,0 +1,29 @@
+name: Codeward Code Review & Security Audit
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  codeward-review:
+    name: Multi-Agent AI Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full git history required for branch diffing
+
+      - name: Run Codeward Review Action
+        uses: codeward-ai/codeward@v1
+        with:
+          provider: 'openai'
+          model: 'gpt-4o-mini'
+          api-key: ${{ secrets.OPENAI_API_KEY }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          base-branch: 'origin/${{ github.base_ref }}'
+          fail-on: 'critical'
