@@ -15,6 +15,7 @@ export interface MultiAgentRunnerOptions {
   verbose?: boolean;
   customPrompt?: string;
   customRules?: Array<{ id: string; name: string; description: string; severity?: string }>;
+  customAgents?: BaseAgent[];
 }
 
 export class MultiAgentRunner {
@@ -36,6 +37,7 @@ export class MultiAgentRunner {
       new SecuritySentinelAgent(),
       new LogicHoundAgent(),
       new PerformanceCriticAgent(),
+      ...(options.customAgents || []),
     ];
 
     if (options.enabledAgents && options.enabledAgents.length > 0) {

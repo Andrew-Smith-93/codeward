@@ -7,14 +7,19 @@ import { GitExtractor } from '../git/diff-extractor.js';
 import { chunkDiffFiles } from '../git/chunker.js';
 import { resolveProvider } from '../providers/factory.js';
 import { MultiAgentRunner } from '../agents/runner.js';
+import { loadCustomAgents } from '../agents/plugin-loader.js';
+import { sanitizeAndFilterFindings, verifyCriticalFindings } from '../agents/verifier.js';
 import { synthesizeReport } from '../synthesizer/aggregator.js';
 import { renderTerminalReport } from '../reporters/terminal-reporter.js';
 import { renderMarkdownReport } from '../reporters/markdown-reporter.js';
 import { renderJsonReport } from '../reporters/json-reporter.js';
 import { renderSarifReport } from '../reporters/sarif-reporter.js';
+import { renderHtmlReport } from '../reporters/html-reporter.js';
 import { emitGitHubAnnotations } from '../reporters/github-annotations.js';
 import { detectGitHubContext } from '../git/github-context.js';
 import { loadConfig } from '../config/loader.js';
+import { promptAndApplyFixes } from '../fixer/interactive.js';
+import { submitGitHubPRReview } from '../github/pr-reviewer.js';
 import { runWatchMode } from './watch.js';
 import { FailOnThreshold, ReviewOptions } from '../types/index.js';
 
@@ -38,11 +43,15 @@ program
   .option('-m, --model <model>', 'Override default model for the selected provider')
   .option('--api-key <key>', 'Provider API key (defaults to env var)')
   .option('--api-url <url>', 'Custom API base URL')
-  .option('-f, --format <format>', 'Output format: terminal, markdown, json, sarif', 'terminal')
+  .option('-f, --format <format>', 'Output format: terminal, markdown, json, sarif, html', 'terminal')
   .option('-o, --output <file>', 'Save output report to file')
+  .option('--html <file>', 'Export interactive HTML report to file')
   .option('--fail-on <severity>', 'Fail with exit code 1 if issues found (critical, warning, suggestion, none)')
   .option('-a, --agents <agents>', 'Comma-separated agents to run: security, logic, performance')
   .option('--pr', 'Output GitHub PR-formatted Markdown')
+  .option('--fix', 'Interactively apply suggested code fixes')
+  .option('-y, --yes', 'Automatically apply all fixes without prompting (with --fix)')
+  .option('--verify-critical', 'Run second-pass verifier on critical findings to eliminate false alarms')
   .option('--exclude <patterns>', 'Comma-separated file patterns to ignore')
   .option('-c, --config <path>', 'Path to custom configuration file')
   .option('-v, --verbose', 'Show verbose debug information')
@@ -56,16 +65,12 @@ program
       // 2. Detect GitHub Actions / PR environment
       const ghContext = await detectGitHubContext();
 
-      let targetBase = opts.base || config.provider; // cli flag takes precedence
+      let targetBase = opts.base;
       if (!opts.base && ghContext.isPullRequest && ghContext.baseRef) {
         targetBase = `origin/${ghContext.baseRef}`;
         if (opts.verbose) {
           console.log(chalk.gray(`Detected GitHub PR #${ghContext.prNumber}: diffing against ${targetBase}`));
         }
-      } else if (opts.base) {
-        targetBase = opts.base;
-      } else {
-        targetBase = undefined;
       }
 
       const format = opts.pr ? 'markdown' : (opts.format || 'terminal').toLowerCase();
@@ -124,7 +129,10 @@ program
       const provider = resolveProvider(reviewOptions);
       const effectiveModel = reviewOptions.model || provider.defaultModel;
 
-      // 6. Parallel Multi-Agent Execution
+      // 6. Custom Agent Plugins
+      const customAgents = await loadCustomAgents(config);
+
+      // 7. Parallel Multi-Agent Execution
       const runner = new MultiAgentRunner({
         provider,
         model: effectiveModel,
@@ -132,13 +140,14 @@ program
         verbose: reviewOptions.verbose,
         customPrompt: config.customPrompt,
         customRules: config.customRules,
+        customAgents,
       });
 
       const agentResults = await runner.run(chunks);
 
-      // 7. Synthesis & Deduplication
+      // 8. Synthesis & Deduplication
       const durationMs = Date.now() - startTime;
-      const report = synthesizeReport(agentResults, {
+      let report = synthesizeReport(agentResults, {
         providerName: provider.name,
         modelName: effectiveModel,
         gitRef,
@@ -146,10 +155,19 @@ program
         durationMs,
       });
 
-      // 8. GitHub Actions Inline Workflow Commands
+      // 9. False-Positive Filtering & Verification
+      report.findings = sanitizeAndFilterFindings(report.findings);
+      if (opts.verifyCritical && report.stats.critical > 0) {
+        if (opts.verbose) {
+          console.log(chalk.gray('Running second-opinion verification on critical findings...'));
+        }
+        report.findings = await verifyCriticalFindings(report.findings, provider, effectiveModel);
+      }
+
+      // 10. GitHub Actions Inline Workflow Commands
       emitGitHubAnnotations(report);
 
-      // 9. Format Output
+      // 11. Format Output
       let rendered = '';
       if (format === 'json') {
         rendered = renderJsonReport(report);
@@ -157,8 +175,18 @@ program
         rendered = renderMarkdownReport(report);
       } else if (format === 'sarif') {
         rendered = renderSarifReport(report);
+      } else if (format === 'html') {
+        rendered = renderHtmlReport(report);
       } else {
         rendered = renderTerminalReport(report);
+      }
+
+      // Save HTML report if --html requested
+      if (opts.html) {
+        const htmlPath = path.resolve(process.cwd(), opts.html);
+        await fs.mkdir(path.dirname(htmlPath), { recursive: true });
+        await fs.writeFile(htmlPath, renderHtmlReport(report), 'utf-8');
+        console.log(chalk.green(`Interactive HTML report saved to: ${htmlPath}`));
       }
 
       // Print or write to file
@@ -173,7 +201,12 @@ program
         console.log(rendered);
       }
 
-      // 10. CI Exit Code Evaluation
+      // 12. Auto-Fix Execution
+      if (opts.fix) {
+        await promptAndApplyFixes(report.findings, !!opts.yes);
+      }
+
+      // 13. CI Exit Code Evaluation
       let shouldFail = false;
       const maxCritical = config.maxCritical ?? 0;
       const maxWarning = config.maxWarning ?? 100;
@@ -207,6 +240,174 @@ program
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(chalk.red(`\nError: ${message}`));
+      process.exit(1);
+    }
+  });
+
+program
+  .command('fix')
+  .description('Review changes and interactively apply suggested code fixes')
+  .option('-b, --base <branch>', 'Base git branch to diff against')
+  .option('-s, --staged', 'Review only staged changes')
+  .option('-u, --unstaged', 'Review unstaged working tree changes')
+  .option('-p, --provider <provider>', 'LLM provider')
+  .option('-m, --model <model>', 'LLM model')
+  .option('-y, --yes', 'Automatically apply all fixes without prompting')
+  .option('-c, --config <path>', 'Path to custom configuration file')
+  .action(async (opts) => {
+    try {
+      const config = await loadConfig(opts.config);
+      const reviewOptions: ReviewOptions = {
+        base: opts.base,
+        staged: opts.staged,
+        unstaged: opts.unstaged,
+        provider: opts.provider || config.provider,
+        model: opts.model || config.model,
+        agents: config.agents,
+        exclude: config.exclude,
+      };
+
+      const git = new GitExtractor();
+      const { files, gitRef } = await git.extractReviewableDiff(reviewOptions);
+
+      if (files.length === 0) {
+        console.log(chalk.yellow(`No reviewable changes found for target "${gitRef}".`));
+        return;
+      }
+
+      const chunks = chunkDiffFiles(files);
+      const provider = resolveProvider(reviewOptions);
+      const effectiveModel = reviewOptions.model || provider.defaultModel;
+
+      const runner = new MultiAgentRunner({
+        provider,
+        model: effectiveModel,
+        enabledAgents: reviewOptions.agents,
+        customPrompt: config.customPrompt,
+        customRules: config.customRules,
+      });
+
+      const agentResults = await runner.run(chunks);
+      const report = synthesizeReport(agentResults, {
+        providerName: provider.name,
+        modelName: effectiveModel,
+        gitRef,
+        filesReviewedCount: files.length,
+        durationMs: 0,
+      });
+
+      console.log(renderTerminalReport(report));
+      await promptAndApplyFixes(report.findings, !!opts.yes);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(chalk.red(`Fix error: ${message}`));
+      process.exit(1);
+    }
+  });
+
+program
+  .command('pr <number>')
+  .description('Audit a GitHub Pull Request and submit line-by-line review comments')
+  .option('--owner <owner>', 'GitHub repository owner')
+  .option('--repo <repo>', 'GitHub repository name')
+  .option('--token <token>', 'GitHub personal access token (defaults to GITHUB_TOKEN)')
+  .option('-p, --provider <provider>', 'LLM provider')
+  .option('-m, --model <model>', 'LLM model')
+  .option('-c, --config <path>', 'Path to custom configuration file')
+  .action(async (prNumberStr, opts) => {
+    try {
+      const prNumber = parseInt(prNumberStr, 10);
+      if (isNaN(prNumber) || prNumber <= 0) {
+        throw new Error(`Invalid PR number: ${prNumberStr}`);
+      }
+
+      const token = opts.token || process.env.GITHUB_TOKEN;
+      if (!token) {
+        throw new Error('GitHub token missing. Pass --token <token> or set GITHUB_TOKEN environment variable.');
+      }
+
+      let owner = opts.owner;
+      let repo = opts.repo;
+
+      if (!owner || !repo) {
+        if (process.env.GITHUB_REPOSITORY) {
+          const [o, r] = process.env.GITHUB_REPOSITORY.split('/');
+          owner = owner || o;
+          repo = repo || r;
+        } else {
+          // Attempt to extract from git remote
+          const git = new GitExtractor();
+          const ctx = await git.getGitContext();
+          // Fallback prompt
+          if (!owner || !repo) {
+            throw new Error('Please specify --owner <owner> and --repo <repo>.');
+          }
+        }
+      }
+
+      console.log(chalk.cyan(`Auditing GitHub PR #${prNumber} on ${owner}/${repo}...`));
+
+      // Fetch PR diff from GitHub API
+      const diffUrl = `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}`;
+      const diffRes = await fetch(diffUrl, {
+        headers: {
+          Accept: 'application/vnd.github.v3.diff',
+          Authorization: `Bearer ${token}`,
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
+      });
+
+      if (!diffRes.ok) {
+        throw new Error(`Failed to fetch PR diff (${diffRes.status}): ${await diffRes.text()}`);
+      }
+
+      const rawDiff = await diffRes.text();
+      const config = await loadConfig(opts.config);
+      const provider = resolveProvider({ provider: opts.provider || config.provider });
+
+      const { parseDiff } = await import('../git/diff-parser.js');
+      const { shouldIgnoreFile } = await import('../git/filter.js');
+      const parsed = parseDiff(rawDiff);
+      const files = parsed.filter((f) => !shouldIgnoreFile(f.newPath, config.exclude));
+
+      if (files.length === 0) {
+        console.log(chalk.green('No reviewable changes in PR.'));
+        return;
+      }
+
+      const chunks = chunkDiffFiles(files);
+      const runner = new MultiAgentRunner({
+        provider,
+        model: opts.model || config.model,
+        enabledAgents: config.agents,
+      });
+
+      const results = await runner.run(chunks);
+      const report = synthesizeReport(results, {
+        providerName: provider.name,
+        modelName: opts.model || provider.defaultModel,
+        gitRef: `PR #${prNumber}`,
+        filesReviewedCount: files.length,
+        durationMs: 0,
+      });
+
+      console.log(renderTerminalReport(report));
+
+      console.log(chalk.gray(`Submitting line-level review comments to PR #${prNumber}...`));
+      const submission = await submitGitHubPRReview(report, {
+        repoOwner: owner,
+        repoName: repo,
+        pullNumber: prNumber,
+        githubToken: token,
+      });
+
+      console.log(chalk.green.bold(`✓ Submitted PR Review: ${submission.event} (${submission.commentCount} line comments posted).`));
+      if (submission.url) {
+        console.log(chalk.cyan(`Review URL: ${submission.url}`));
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(chalk.red(`PR command failed: ${message}`));
       process.exit(1);
     }
   });
@@ -307,6 +508,7 @@ jobs:
       console.log('  1. Add OPENAI_API_KEY to your GitHub repository secrets.');
       console.log('  2. Run `codeward review --base main` to test locally.');
       console.log('  3. Run `codeward watch` for real-time live review while coding.');
+      console.log('  4. Run `codeward fix` to interactively apply AI suggested fixes.');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(chalk.red(`Init failed: ${message}`));
