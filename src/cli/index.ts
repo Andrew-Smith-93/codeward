@@ -516,4 +516,18 @@ jobs:
     }
   });
 
+program
+  .command('hook')
+  .description('Install Codeward pre-commit git hook to automatically audit staged changes')
+  .action(async () => {
+    try {
+      const { installGitHook } = await import('./hook.js');
+      await installGitHook();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(chalk.red(`Hook installation failed: ${message}`));
+      process.exit(1);
+    }
+  });
+
 program.parse();
