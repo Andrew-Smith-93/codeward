@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../helpers/node-test.js';
 import { areFindingsDuplicate, mergeDuplicates, synthesizeReport } from '../../src/synthesizer/aggregator.js';
 import { AgentReviewResult, Finding } from '../../src/types/index.js';
 

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../helpers/node-test.js';
 import { lookupRule, RULE_REGISTRY } from '../../src/rules/index.js';
 
 describe('Rules Registry', () => {

@@ -265,6 +265,8 @@ jobs:
 - **One-Click GitHub Suggestions**: Renders code fixes using ````suggestion blocks so maintainers can apply fixes directly in GitHub UI.
 - **CI Quality Gate**: Automatically blocks PR merges by exiting with code `1` when critical security vulnerabilities are introduced.
 
+The action reads `api-key` from the provider-specific environment variable and does not pass it as a CLI argument. Keep the value in a GitHub Actions secret, as in the example above. PR comments are enabled by default; set `comment-on-pr: 'false'` to disable them. When enabled, a review report can still be posted if the review step fails.
+
 ---
 
 ## ⚙️ Configuration File (`.codewardrc.json`)

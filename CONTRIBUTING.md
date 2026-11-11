@@ -4,6 +4,8 @@ Thank you for your interest in contributing to **Codeward**! We welcome bug repo
 
 ## Development Setup
 
+Codeward's CLI/runtime engine floor is Node.js 18.0.0 (`package.json` `engines`). Development and tests require Node.js 18.8.0 or newer because the built-in `node:test` `beforeEach` and `afterEach` hooks used by the test suite require that version. The higher tooling minimum does not change the runtime floor.
+
 1. **Clone the repository:**
    ```bash
    git clone https://github.com/codeward-ai/codeward.git

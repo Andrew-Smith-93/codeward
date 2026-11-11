@@ -5,8 +5,8 @@ import { AggregatedReport, Finding } from '../types/index.js';
  * so GitHub natively renders inline diff annotations on the PR "Files changed" tab.
  */
 export function emitGitHubAnnotations(report: AggregatedReport): void {
-  // Only emit if running inside GitHub Actions
-  if (!process.env.GITHUB_ACTIONS) {
+  // Mock findings are canned test data, never actual security annotations.
+  if (report.provider === 'mock' || !process.env.GITHUB_ACTIONS) {
     return;
   }
 

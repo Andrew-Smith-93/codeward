@@ -21,6 +21,7 @@ import { loadConfig } from '../config/loader.js';
 import { promptAndApplyFixes } from '../fixer/interactive.js';
 import { submitGitHubPRReview } from '../github/pr-reviewer.js';
 import { runWatchMode } from './watch.js';
+import { resolveReviewBase } from './review-base.js';
 import { FailOnThreshold, ReviewOptions } from '../types/index.js';
 
 // Load environment variables (.env)
@@ -65,9 +66,8 @@ program
       // 2. Detect GitHub Actions / PR environment
       const ghContext = await detectGitHubContext();
 
-      let targetBase = opts.base;
-      if (!opts.base && ghContext.isPullRequest && ghContext.baseRef) {
-        targetBase = `origin/${ghContext.baseRef}`;
+      const targetBase = resolveReviewBase(opts, ghContext);
+      if (!opts.base && !opts.staged && !opts.unstaged && ghContext.isPullRequest && ghContext.baseRef) {
         if (opts.verbose) {
           console.log(chalk.gray(`Detected GitHub PR #${ghContext.prNumber}: diffing against ${targetBase}`));
         }
