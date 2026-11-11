@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../helpers/node-test.js';
 import { sanitizeAndFilterFindings } from '../../src/agents/verifier.js';
 import { Finding } from '../../src/types/index.js';
 

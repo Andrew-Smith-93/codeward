@@ -27,8 +27,8 @@
     "build": "tsc",
     "watch": "tsc --watch",
     "start": "node ./bin/codeward.js",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "build:test": "tsc -p tsconfig.test.json",
+    "test": "npm run build:test && node --test .test-dist/tests/*/*.test.js"
   },
   "keywords": [
     "code-review",
@@ -51,12 +51,11 @@
     "commander": "^13.1.0",
     "dotenv": "^16.4.7",
     "ora": "^8.2.0",
-    "zod": "^3.24.2"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
-    "typescript": "^5.8.2",
-    "vitest": "^3.0.8"
+    "typescript": "^5.8.2"
   },
   "engines": {
     "node": ">=18.0.0"

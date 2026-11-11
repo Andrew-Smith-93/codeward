@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../helpers/node-test.js';
 import { renderSarifReport } from '../../src/reporters/sarif-reporter.js';
 import { AggregatedReport } from '../../src/types/index.js';
 

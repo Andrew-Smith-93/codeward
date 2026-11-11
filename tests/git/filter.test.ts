@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../helpers/node-test.js';
 import { shouldIgnoreFile } from '../../src/git/filter.js';
 
 describe('Git Filter', () => {
