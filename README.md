@@ -93,7 +93,7 @@ All findings pass through an intelligent **Synthesis & Deduplication Engine** th
 
 **Install from this GitHub repository only.** The unscoped npm package named `codeward` is a different project. Do not use it to install, run, or import this project.
 
-Build this checkout with Node.js 18.8+:
+Build this checkout with Node.js 18.8+. Cloning source and fetching locked build dependencies normally use the network. The mock review does not contact a model provider:
 
 ```bash
 git clone https://github.com/Andrew-Smith-93/codeward.git
@@ -110,7 +110,15 @@ node "$CODEWARD_DIR/bin/codeward.js" init
 node "$CODEWARD_DIR/bin/codeward.js" review --staged --provider mock --fail-on none
 ```
 
-The mock provider checks local wiring only; its findings are not a security audit. Configure a real provider separately only if you intend to send your selected code diffs to it.
+The mock provider checks local wiring only; its findings are synthetic. Configure a real provider separately only if you intend to send your selected code diffs to it.
+
+To try a self-contained example, run this after building a checkout that contains the demo script:
+
+```bash
+bash "$CODEWARD_DIR/scripts/demo-offline.sh"
+```
+
+The demo creates and removes a temporary Git repository with one benign staged file. It does not use your current repository, provider credentials, or GitHub. To reproduce the same mock path from the original [v2.0.0 tag](https://github.com/Andrew-Smith-93/codeward/tree/v2.0.0), build that checkout and use the explicit CLI command above; the convenience script is not part of that tag.
 
 ---
 
@@ -124,19 +132,19 @@ The mock provider checks local wiring only; its findings are not a security audi
 
 You can run all three agents (default) or select specific ones:
 ```bash
-codeward review --base main --agents security,logic
+node "$CODEWARD_DIR/bin/codeward.js" review --staged --agents security,logic --provider mock --fail-on none
 ```
 
 ---
 
 ## 📋 CLI Commands & Capabilities
 
-| Command | Description | Example |
-| :--- | :--- | :--- |
-| `codeward review` | Core multi-agent review on git diff or pull request | `codeward review --staged` |
-| `codeward fix` | Automatically patch files using AI suggested fixes | `codeward fix --yes` |
-| `codeward pr <num>` | Submit line-level inline comments to a GitHub PR | `codeward pr 42 --owner acme --repo core` |
-| `codeward watch` | Continuous review loop on file save/staging | `codeward watch` |
+| Local subcommand | Behavior |
+| :--- | :--- |
+| `review` | Reviews a selected Git diff. The examples above select the offline mock provider explicitly. |
+| `fix` | Can modify the local worktree. Inspect changes before accepting them. |
+| `pr` | Can send inline comments to a GitHub pull request. It is not part of the offline Action. |
+| `watch` | Repeats local review on changes. A configured remote provider receives the selected diffs. |
 
 ### Review Options
 
@@ -168,7 +176,7 @@ For source-based development, see the [exports in this repository](./src/index.t
 
 ## GitHub Action: offline smoke check only
 
-Version 2 removes the legacy Action's provider, credential, and PR comment inputs. It only checks local wiring on a Git diff with mock findings. It does not contact an LLM, post comments, modify files, or certify the code as secure. Do not enable the v1.0.0 Action with credentials.
+Version 2 removes the legacy Action's provider, credential, and PR comment inputs. It only checks local wiring on a Git diff with mock findings. The review step does not contact an LLM, post comments, edit source, or certify the code as secure. GitHub checkout, runner setup, and locked dependency installation can still use the network before the mock review starts. Do not enable the v1.0.0 Action with credentials.
 
 For a GitHub Actions setup, use the source checked out by [this repository's read-only smoke workflow](./.github/workflows/review.yml), or pin this project to a reviewed version 2 release. Check out with full history, turn off checkout credential persistence, and grant only `contents: read`. The Action's only input is an existing remote-tracking base branch (default `origin/main`).
 
@@ -215,7 +223,7 @@ npm test
 npm run build
 
 # Run local CLI binary
-./bin/codeward.js review --provider mock --staged
+node ./bin/codeward.js review --provider mock --staged --fail-on none
 ```
 
 ---
