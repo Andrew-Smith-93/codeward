@@ -6,13 +6,13 @@ Thank you for your interest in contributing to **Codeward**! We welcome bug repo
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/codeward-ai/codeward.git
+   git clone https://github.com/Andrew-Smith-93/codeward.git
    cd codeward
    ```
 
 2. **Install dependencies:**
    ```bash
-   npm install
+   npm ci --ignore-scripts
    ```
 
 3. **Run TypeScript compiler in watch mode:**
@@ -50,4 +50,4 @@ Codeward makes it trivial to add specialized review agents:
 - Ensure `npm test` passes completely before submitting.
 - Verify `npm run build` succeeds without compiler warnings.
 - Keep PRs focused on a single feature or bug fix.
-- All PRs are automatically reviewed by Codeward in CI!
+- CI has a local offline mock smoke check; it is not a security audit.

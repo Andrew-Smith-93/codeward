@@ -73,8 +73,8 @@ export function renderSarifReport(report: AggregatedReport): string {
         tool: {
           driver: {
             name: 'Codeward',
-            version: '1.0.0',
-            informationUri: 'https://github.com/codeward-ai/codeward',
+            version: '2.0.0',
+            informationUri: 'https://github.com/Andrew-Smith-93/codeward',
             rules: sarifRules,
           },
         },

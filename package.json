@@ -1,6 +1,7 @@
 {
   "name": "codeward",
-  "version": "1.0.0",
+  "version": "2.0.0",
+  "private": true,
   "description": "Multi-agent AI code review and security audit CLI tool and GitHub Action",
   "type": "module",
   "bin": {
@@ -27,7 +28,7 @@
     "build": "tsc",
     "watch": "tsc --watch",
     "start": "node ./bin/codeward.js",
-    "test": "vitest run",
+    "test": "npm run build && vitest run",
     "test:watch": "vitest"
   },
   "keywords": [

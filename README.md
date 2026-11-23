@@ -106,6 +106,7 @@ CODEWARD_DIR="$PWD"
 From an existing Git repository with at least one commit and a staged change, try the built CLI offline:
 
 ```bash
+node "$CODEWARD_DIR/bin/codeward.js" init
 node "$CODEWARD_DIR/bin/codeward.js" review --staged --provider mock --fail-on none
 ```
 
@@ -165,11 +166,13 @@ Options:
 
 For source-based development, see the [exports in this repository](./src/index.ts). The npm package with the same unscoped name is not this project's API.
 
-## GitHub Action and setup commands
+## GitHub Action: offline smoke check only
 
-Do not enable the v1.0.0 Action with credentials. The Marketplace quickstart is tied to that older version and may still show an unrelated npm package or an incorrect Action reference.
+Version 2 removes the legacy Action's provider, credential, and PR comment inputs. It only checks local wiring on a Git diff with mock findings. It does not contact an LLM, post comments, modify files, or certify the code as secure. Do not enable the v1.0.0 Action with credentials.
 
-Do not run `init` or `hook` from v1.0.0 or this revision. Those commands can replace existing local files, and the legacy hook can invoke the unrelated npm package. The source-only quickstart above does not use either command.
+For a GitHub Actions setup, use the source checked out by [this repository's read-only smoke workflow](./.github/workflows/review.yml), or pin this project to a reviewed version 2 release. Check out with full history, turn off checkout credential persistence, and grant only `contents: read`. The Action's only input is an existing remote-tracking base branch (default `origin/main`).
+
+`init` only creates an offline config. It does not set up GitHub Actions, replace existing configs, or edit existing workflows. The optional `hook` command creates an offline smoke hook tied to the current local CLI and does not replace an existing hook. Neither command uses the unscoped npm package.
 
 ## Offline configuration
 
