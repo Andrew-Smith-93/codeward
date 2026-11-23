@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../helpers/node-test.js';
 import { MultiAgentRunner } from '../../src/agents/runner.js';
 import { MockProvider } from '../../src/providers/mock.js';
 import { DiffChunk } from '../../src/git/chunker.js';

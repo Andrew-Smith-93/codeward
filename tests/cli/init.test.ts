@@ -3,10 +3,9 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { test } from 'vitest';
-import { fileURLToPath } from 'node:url';
+import { test } from 'node:test';
 
-const cli = fileURLToPath(new URL('../../bin/codeward.js', import.meta.url));
+const cli = path.resolve('bin/codeward.js');
 
 async function withFixture(run: (cwd: string) => Promise<void>) {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'codeward-init-test-'));

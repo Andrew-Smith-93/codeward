@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../helpers/node-test.js';
 import { parseDiff, extractSnippetAroundLine } from '../../src/git/diff-parser.js';
 
 const SAMPLE_DIFF = `diff --git a/src/auth.ts b/src/auth.ts

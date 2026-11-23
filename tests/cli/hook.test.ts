@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { test } from 'vitest';
+import { test } from 'node:test';
 import { installGitHook } from '../../src/cli/hook.js';
 
 async function withFixture(run: (cwd: string) => Promise<void>) {

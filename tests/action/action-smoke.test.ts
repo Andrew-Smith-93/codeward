@@ -3,10 +3,9 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { test } from 'vitest';
+import { test } from 'node:test';
 
-const project = fileURLToPath(new URL('../../', import.meta.url));
+const project = process.cwd();
 const script = path.join(project, 'scripts/action-smoke.sh');
 
 async function fixture(run: (tmp: string, repo: string) => Promise<void>) {

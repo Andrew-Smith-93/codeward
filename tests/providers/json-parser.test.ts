@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../helpers/node-test.js';
 import { extractAndParseJSON } from '../../src/providers/json-parser.js';
 
 describe('JSON Parser', () => {
