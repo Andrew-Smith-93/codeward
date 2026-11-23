@@ -1,123 +1,36 @@
 name: 'Codeward Multi-Agent Code Review'
-description: 'Runs parallel multi-agent security audits and reliability reviews on pull requests'
+description: 'Offline mock smoke check for Codeward on a Git diff; no security verdict'
 author: 'Codeward'
 branding:
   icon: 'shield'
   color: 'blue'
 
 inputs:
-  provider:
-    description: 'LLM provider (openai, anthropic, gemini, ollama)'
-    required: false
-    default: 'openai'
-  model:
-    description: 'Model identifier (e.g. gpt-4o-mini, claude-3-5-sonnet-20241022, gemini-2.0-flash)'
-    required: false
-    default: ''
-  api-key:
-    description: 'API key for the chosen LLM provider'
-    required: false
-    default: ''
-  api-url:
-    description: 'Custom API base URL'
-    required: false
-    default: ''
   base-branch:
-    description: 'Target base branch for diff analysis'
+    description: 'Existing origin remote-tracking branch, e.g. origin/main. Check out with full history first.'
     required: false
     default: 'origin/main'
-  fail-on:
-    description: 'Exit code 1 threshold (critical, warning, suggestion, none)'
-    required: false
-    default: 'critical'
-  agents:
-    description: 'Comma-separated agents to run (security, logic, performance)'
-    required: false
-    default: 'security,logic,performance'
-  github-token:
-    description: 'GitHub token for posting review comments to Pull Request'
-    required: false
-    default: ''
-  comment-on-pr:
-    description: 'Post review markdown as PR comment'
-    required: false
-    default: 'true'
 
 runs:
   using: 'composite'
   steps:
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
       with:
         node-version: 22
 
-    - name: Install and Build Codeward
-      shell: bash
-      run: |
-        cd "${{ github.action_path }}"
-        npm ci
-        npm run build
-        npm link
-
-    - name: Run Multi-Agent Review
-      id: review
+    - name: Build Codeward from lockfile
       shell: bash
       env:
-        OPENAI_API_KEY: ${{ inputs.api-key }}
-        ANTHROPIC_API_KEY: ${{ inputs.api-key }}
-        GEMINI_API_KEY: ${{ inputs.api-key }}
+        CODEWARD_ACTION_PATH: ${{ github.action_path }}
       run: |
-        CMD="codeward review --base ${{ inputs.base-branch }} --provider ${{ inputs.provider }} --fail-on ${{ inputs.fail-on }} --agents ${{ inputs.agents }} --pr --output /tmp/codeward-report.md"
-        if [ -n "${{ inputs.model }}" ]; then
-          CMD="$CMD --model ${{ inputs.model }}"
-        fi
-        if [ -n "${{ inputs.api-key }}" ]; then
-          CMD="$CMD --api-key ${{ inputs.api-key }}"
-        fi
-        if [ -n "${{ inputs.api-url }}" ]; then
-          CMD="$CMD --api-url ${{ inputs.api-url }}"
-        fi
+        cd "$CODEWARD_ACTION_PATH"
+        npm ci --ignore-scripts --no-audit --no-fund
+        npm run build
 
-        echo "Executing: $CMD"
-        $CMD
-
-    - name: Comment on PR
-      if: ${{ (inputs.comment-on-pr == 'true' || success() || failure()) && inputs.github-token != '' && github.event_name == 'pull_request' }}
-      uses: actions/github-script@v7
-      with:
-        github-token: ${{ inputs.github-token }}
-        script: |
-          const fs = require('fs');
-          if (!fs.existsSync('/tmp/codeward-report.md')) {
-            console.log('No report file found to comment.');
-            return;
-          }
-          const body = fs.readFileSync('/tmp/codeward-report.md', 'utf8');
-          const issue_number = context.issue.number;
-
-          // Find existing sticky comment
-          const { data: comments } = await github.rest.issues.listComments({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            issue_number,
-          });
-
-          const botComment = comments.find(c => c.body.includes('Codeward Code Review & Security Audit'));
-
-          if (botComment) {
-            await github.rest.issues.updateComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              comment_id: botComment.id,
-              body,
-            });
-            console.log('Updated existing Codeward PR comment.');
-          } else {
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number,
-              body,
-            });
-            console.log('Created new Codeward PR comment.');
-          }
+    - name: Run the offline mock smoke check
+      shell: bash
+      env:
+        CODEWARD_ACTION_PATH: ${{ github.action_path }}
+        CODEWARD_BASE_REF: ${{ inputs.base-branch }}
+      run: bash "$CODEWARD_ACTION_PATH/scripts/action-smoke.sh"

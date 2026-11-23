@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from '../helpers/node-test.js';
 import { renderTerminalReport } from '../../src/reporters/terminal-reporter.js';
 import { renderMarkdownReport } from '../../src/reporters/markdown-reporter.js';
 import { renderJsonReport } from '../../src/reporters/json-reporter.js';

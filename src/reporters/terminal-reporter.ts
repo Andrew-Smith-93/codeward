@@ -17,7 +17,7 @@ export function renderTerminalReport(report: AggregatedReport): string {
   const durationSec = (report.durationMs / 1000).toFixed(1);
 
   const headerContent = [
-    `${chalk.bold.cyan('🛡️  CODEWARD')}  ${chalk.gray(`v1.0.0`)}  ${chalk.dim('• Multi-Agent Code Review & Security Audit')}`,
+    `${chalk.bold.cyan('🛡️  CODEWARD')}  ${chalk.gray(`v2.0.0`)}  ${chalk.dim('• Multi-Agent Code Review & Security Audit')}`,
     '',
     `  ${chalk.bold('Verdict:')}     ${verdictColor(`${verdictIcon} ${report.verdict}`)}`,
     `  ${chalk.bold('Summary:')}     ${report.summary}`,

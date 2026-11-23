@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     name: Build & Test
@@ -17,15 +20,18 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # The PR smoke review requires base history.
+          persist-credentials: false
 
       - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
 
       - name: Install Dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts --no-audit --no-fund
 
       - name: Typecheck & Build
         run: npm run build

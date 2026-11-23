@@ -20,7 +20,7 @@ export function renderMarkdownReport(report: AggregatedReport): string {
     lines.push('No security vulnerabilities, subtle logic bugs, or architectural regressions were identified in this changeset.');
     lines.push('');
     lines.push('---');
-    lines.push('*Reviewed automatically by [Codeward](https://github.com/codeward-ai/codeward).*');
+    lines.push('*Reviewed automatically by [Codeward](https://github.com/Andrew-Smith-93/codeward).*');
     return lines.join('\n');
   }
 

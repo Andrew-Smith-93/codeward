@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import { GitExtractor } from '../git/diff-extractor.js';
 import { chunkDiffFiles } from '../git/chunker.js';
@@ -24,14 +25,15 @@ import { runWatchMode } from './watch.js';
 import { FailOnThreshold, ReviewOptions } from '../types/index.js';
 
 // Load environment variables (.env)
-dotenv.config();
+const offlineSmoke = process.env.CODEWARD_OFFLINE_SMOKE === '1';
+if (!offlineSmoke) dotenv.config();
 
 const program = new Command();
 
 program
   .name('codeward')
   .description('Multi-agent code review and security audit CLI and GitHub Action')
-  .version('1.0.0');
+  .version('2.0.0');
 
 program
   .command('review')
@@ -130,7 +132,7 @@ program
       const effectiveModel = reviewOptions.model || provider.defaultModel;
 
       // 6. Custom Agent Plugins
-      const customAgents = await loadCustomAgents(config);
+      const customAgents = offlineSmoke ? [] : await loadCustomAgents(config);
 
       // 7. Parallel Multi-Agent Execution
       const runner = new MultiAgentRunner({
@@ -441,88 +443,51 @@ program
 
 program
   .command('init')
-  .description('Scaffold Codeward configuration and GitHub Action workflow')
+  .description('Create an offline .codewardrc.json without overwriting existing files')
   .action(async () => {
+    const configPath = path.resolve('.codewardrc.json');
+    const config = {
+      $schema: 'https://raw.githubusercontent.com/Andrew-Smith-93/codeward/e08724f9ff4f9922099651117ff74bb1872e480c/schema.json',
+      provider: 'mock',
+      failOn: 'none',
+    };
+
     try {
-      const cwd = process.cwd();
-      const configPath = path.join(cwd, '.codewardrc.json');
-      const workflowDir = path.join(cwd, '.github', 'workflows');
-      const workflowPath = path.join(workflowDir, 'codeward-review.yml');
+      // Do not shadow a supported config under a different local filename.
+      for (const filename of ['.codewardrc', 'codeward.config.json']) {
+        try {
+          await fs.lstat(filename);
+        } catch (err: unknown) {
+          if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+            continue;
+          }
+          throw err;
+        }
+        throw new Error(`${filename} already exists and was left unchanged.`);
+      }
 
-      const configContent = {
-        $schema: 'https://raw.githubusercontent.com/codeward-ai/codeward/main/schema.json',
-        provider: 'openai',
-        model: 'gpt-4o-mini',
-        failOn: 'critical',
-        agents: ['security', 'logic', 'performance'],
-        exclude: ['**/*.spec.ts', '**/*.test.ts'],
-        customRules: [
-          {
-            id: 'TEAM-001',
-            name: 'Require strict tenant validation',
-            description: 'All database queries must include tenant_id filter.',
-            severity: 'CRITICAL',
-          },
-        ],
-      };
-
-      const workflowContent = `name: Codeward Multi-Agent Review
-
-on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-
-permissions:
-  contents: read
-  pull-requests: write
-  security-events: write # Required for SARIF upload
-
-jobs:
-  review:
-    name: Multi-Agent Code Review
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Run Codeward Review
-        uses: codeward-ai/codeward@v1
-        with:
-          provider: 'openai'
-          model: 'gpt-4o-mini'
-          api-key: \${{ secrets.OPENAI_API_KEY }}
-          github-token: \${{ secrets.GITHUB_TOKEN }}
-          fail-on: 'critical'
-`;
-
-      await fs.writeFile(configPath, JSON.stringify(configContent, null, 2), 'utf-8');
-      await fs.mkdir(workflowDir, { recursive: true });
-      await fs.writeFile(workflowPath, workflowContent, 'utf-8');
-
-      console.log(chalk.green.bold('✓ Codeward initialized successfully!'));
-      console.log(chalk.gray(`  Created: ${configPath}`));
-      console.log(chalk.gray(`  Created: ${workflowPath}`));
-      console.log(chalk.cyan('\nNext steps:'));
-      console.log('  1. Add OPENAI_API_KEY to your GitHub repository secrets.');
-      console.log('  2. Run `codeward review --base main` to test locally.');
-      console.log('  3. Run `codeward watch` for real-time live review while coding.');
-      console.log('  4. Run `codeward fix` to interactively apply AI suggested fixes.');
+      await fs.writeFile(configPath, JSON.stringify(config, null, 2) + '\n', {
+        encoding: 'utf-8',
+        flag: 'wx',
+      });
+      console.log(chalk.green(`Created: ${configPath}`));
+      console.log('The mock provider is offline and is not a security audit. No GitHub workflow was created.');
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = (err as NodeJS.ErrnoException).code === 'EEXIST'
+        ? `${configPath} already exists and was left unchanged.`
+        : err instanceof Error ? err.message : String(err);
       console.error(chalk.red(`Init failed: ${message}`));
-      process.exit(1);
+      process.exitCode = 1;
     }
   });
 
 program
   .command('hook')
-  .description('Install Codeward pre-commit git hook to automatically audit staged changes')
+  .description('Install an offline pre-commit smoke hook without overwriting an existing hook')
   .action(async () => {
     try {
       const { installGitHook } = await import('./hook.js');
-      await installGitHook();
+      await installGitHook(process.cwd(), process.execPath, fileURLToPath(import.meta.url));
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(chalk.red(`Hook installation failed: ${message}`));
